@@ -9,8 +9,10 @@ import {
   Menu,
   X,
   ChefHat,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/store/useStore'
 
 const navItems = [
   { to: '/calendar', label: '厨房日历', icon: CalendarDays },
@@ -20,13 +22,21 @@ const navItems = [
   { to: '/announcements', label: '公告', icon: Megaphone },
 ]
 
+const adminNavItems = [
+  { to: '/settings', label: '设置', icon: Settings },
+]
+
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
+  const { currentUser } = useStore()
 
   const handleNavClick = () => {
     setMobileOpen(false)
   }
+
+  const isAdmin = currentUser.role === 'admin'
+  const allNavItems = isAdmin ? [...navItems, ...adminNavItems] : navItems
 
   return (
     <div className="min-h-screen bg-accent">
@@ -60,7 +70,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex flex-col gap-1 p-4">
-          {navItems.map((item) => {
+          {allNavItems.map((item) => {
             const Icon = item.icon
             const isActive = location.pathname === item.to
             return (

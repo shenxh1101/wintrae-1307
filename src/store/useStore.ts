@@ -8,6 +8,7 @@ import type {
   DutyRecord,
   Announcement,
   TimeSlot,
+  DeviceStatus,
 } from '../types'
 import {
   mockBookings,
@@ -22,6 +23,14 @@ interface Settings {
   maxPeoplePerBooking: number
   bookingAdvanceDays: number
   cleaningRequired: boolean
+}
+
+interface SlotAvailability {
+  slotId: string
+  totalCapacity: number
+  usedCapacity: number
+  remainingCapacity: number
+  isFull: boolean
 }
 
 interface AppState {
@@ -39,9 +48,12 @@ interface AppState {
   deleteBooking: (id: string) => boolean
   getBookingsByDate: (date: string) => Booking[]
   getBookingsByDateRange: (start: string, end: string) => Booking[]
+  getSlotAvailability: (date: string, slotId: string) => SlotAvailability
+  getDateSlotAvailabilities: (date: string) => SlotAvailability[]
 
   updateDevice: (id: string, data: Partial<Device>) => Device | null
   getDeviceById: (id: string) => Device | undefined
+  updateDeviceStatus: (id: string, status: DeviceStatus) => Device | null
 
   updateInventory: (id: string, data: Partial<Inventory>) => Inventory | null
   consumeInventory: (id: string, amount: number) => Inventory | null
@@ -49,9 +61,13 @@ interface AppState {
 
   addDutyRecord: (data: Omit<DutyRecord, 'id' | 'createdAt'>) => DutyRecord
   updateDutyRecord: (id: string, data: Partial<DutyRecord>) => DutyRecord | null
+  getDutyRecordByDate: (date: string) => DutyRecord | undefined
 
   addAnnouncement: (data: Omit<Announcement, 'id' | 'createdAt'>) => Announcement
   toggleAnnouncementPin: (id: string) => Announcement | null
+
+  updateTimeSlot: (id: string, data: Partial<TimeSlot>) => TimeSlot | null
+  toggleTimeSlotEnabled: (id: string) => TimeSlot | null
 
   updateSettings: (data: Partial<Settings>) => void
   getConflictBookings: () => Booking[]
@@ -124,6 +140,35 @@ export const useStore = create<AppState>()(
         })
       },
 
+      getSlotAvailability: (date, slotId) => {
+        const slot = get().timeSlots.find((s) => s.id === slotId)
+        if (!slot) {
+          return {
+            slotId,
+            totalCapacity: 0,
+            usedCapacity: 0,
+            remainingCapacity: 0,
+            isFull: true,
+          }
+        }
+        const dayBookings = get()
+          .getBookingsByDate(date)
+          .filter((b) => b.timeSlotId === slotId && b.status !== 'cancelled')
+        const usedCapacity = dayBookings.reduce((sum, b) => sum + b.peopleCount, 0)
+        return {
+          slotId,
+          totalCapacity: slot.maxCapacity,
+          usedCapacity,
+          remainingCapacity: Math.max(0, slot.maxCapacity - usedCapacity),
+          isFull: usedCapacity >= slot.maxCapacity,
+        }
+      },
+
+      getDateSlotAvailabilities: (date) => {
+        const { timeSlots } = get()
+        return timeSlots.map((slot) => get().getSlotAvailability(date, slot.id))
+      },
+
       updateDevice: (id, data) => {
         let updated: Device | null = null
         set((state) => ({
@@ -138,6 +183,9 @@ export const useStore = create<AppState>()(
         return updated
       },
       getDeviceById: (id) => get().devices.find((d) => d.id === id),
+      updateDeviceStatus: (id, status) => {
+        return get().updateDevice(id, { status })
+      },
 
       updateInventory: (id, data) => {
         let updated: Inventory | null = null
@@ -187,6 +235,9 @@ export const useStore = create<AppState>()(
         }))
         return updated
       },
+      getDutyRecordByDate: (date) => {
+        return get().dutyRecords.find((d) => d.date === date)
+      },
 
       addAnnouncement: (data) => {
         const ann: Announcement = {
@@ -211,6 +262,25 @@ export const useStore = create<AppState>()(
           }),
         }))
         return updated
+      },
+
+      updateTimeSlot: (id, data) => {
+        let updated: TimeSlot | null = null
+        set((state) => ({
+          timeSlots: state.timeSlots.map((s) => {
+            if (s.id === id) {
+              updated = { ...s, ...data }
+              return updated
+            }
+            return s
+          }),
+        }))
+        return updated
+      },
+      toggleTimeSlotEnabled: (id) => {
+        const slot = get().timeSlots.find((s) => s.id === id)
+        if (!slot) return null
+        return get().updateTimeSlot(id, { enabled: !slot.enabled })
       },
 
       updateSettings: (data) => {
@@ -266,6 +336,8 @@ export const useStore = create<AppState>()(
         dutyRecords: state.dutyRecords,
         announcements: state.announcements,
         settings: state.settings,
+        timeSlots: state.timeSlots,
+        devices: state.devices,
       }),
     }
   )

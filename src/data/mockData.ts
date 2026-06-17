@@ -14,6 +14,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '10:00',
     label: '早间时段',
     maxCapacity: 10,
+    enabled: true,
   },
   {
     id: 'slot-2',
@@ -21,6 +22,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '12:00',
     label: '上午时段',
     maxCapacity: 15,
+    enabled: true,
   },
   {
     id: 'slot-3',
@@ -28,6 +30,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '14:00',
     label: '午间时段',
     maxCapacity: 20,
+    enabled: true,
   },
   {
     id: 'slot-4',
@@ -35,6 +38,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '16:00',
     label: '下午时段',
     maxCapacity: 15,
+    enabled: true,
   },
   {
     id: 'slot-5',
@@ -42,6 +46,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '18:00',
     label: '傍晚时段',
     maxCapacity: 15,
+    enabled: true,
   },
   {
     id: 'slot-6',
@@ -49,6 +54,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '20:00',
     label: '晚间时段',
     maxCapacity: 20,
+    enabled: true,
   },
   {
     id: 'slot-7',
@@ -56,6 +62,7 @@ export const mockTimeSlots: TimeSlot[] = [
     endTime: '22:00',
     label: '夜间时段',
     maxCapacity: 10,
+    enabled: true,
   },
 ]
 
@@ -384,6 +391,10 @@ export const mockDutyRecords: DutyRecord[] = [
         reportedAt: '2026-06-18 09:30',
       },
     ],
+    consumedMaterials: [
+      { inventoryId: 'inv-9', name: '一次性手套', unit: '双', quantity: 5 },
+      { inventoryId: 'inv-8', name: '保鲜膜', unit: '卷', quantity: 1 },
+    ],
     usageRecord: {
       deviceIds: ['device-1', 'device-2', 'device-6'],
       duration: 120,
@@ -405,6 +416,12 @@ export const mockDutyRecords: DutyRecord[] = [
       { id: 'task-5', name: '垃圾清运', completed: true },
     ],
     deviceReports: [],
+    consumedMaterials: [
+      { inventoryId: 'inv-9', name: '一次性手套', unit: '双', quantity: 20 },
+      { inventoryId: 'inv-10', name: '洗洁精', unit: '瓶', quantity: 1 },
+      { inventoryId: 'inv-11', name: '清洁布', unit: '块', quantity: 3 },
+      { inventoryId: 'inv-12', name: '垃圾袋', unit: '卷', quantity: 2 },
+    ],
     usageRecord: {
       deviceIds: ['device-1', 'device-2', 'device-3', 'device-4', 'device-6'],
       duration: 360,
@@ -433,6 +450,11 @@ export const mockDutyRecords: DutyRecord[] = [
         reportedAt: '2026-06-16 15:20',
       },
     ],
+    consumedMaterials: [
+      { inventoryId: 'inv-5', name: '食用油', unit: '桶', quantity: 1 },
+      { inventoryId: 'inv-10', name: '洗洁精', unit: '瓶', quantity: 1 },
+      { inventoryId: 'inv-9', name: '一次性手套', unit: '双', quantity: 15 },
+    ],
     createdAt: '2026-06-16 08:00',
   },
   {
@@ -449,6 +471,7 @@ export const mockDutyRecords: DutyRecord[] = [
       { id: 'task-5', name: '垃圾清运', completed: false },
     ],
     deviceReports: [],
+    consumedMaterials: [],
     createdAt: '2026-06-17 18:00',
   },
 ]

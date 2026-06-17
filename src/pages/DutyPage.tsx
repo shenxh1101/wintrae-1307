@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   ClipboardList,
   User,
@@ -15,6 +15,8 @@ import {
   Package,
   CheckCircle2,
   X,
+  AlertCircle,
+  Check,
 } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 import { cn } from '@/lib/utils'
@@ -27,25 +29,30 @@ export default function DutyPage() {
     devices,
     inventory,
     currentUser,
+    settings,
     updateDutyRecord,
     addDutyRecord,
     consumeInventory,
+    updateInventory,
+    getDutyRecordByDate,
   } = useStore()
 
   const today = formatDate(new Date())
 
   const todayDuty = useMemo(() => {
-    return dutyRecords.find((d) => d.date === today)
-  }, [dutyRecords, today])
+    return getDutyRecordByDate(today)
+  }, [getDutyRecordByDate, today])
+
+  const defaultCleaningTasks = [
+    { id: 'task-1', name: '灶台清洁', completed: false },
+    { id: 'task-2', name: '地面清扫', completed: false },
+    { id: 'task-3', name: '餐具消毒', completed: false },
+    { id: 'task-4', name: '油烟机擦拭', completed: false },
+    { id: 'task-5', name: '垃圾清运', completed: false },
+  ]
 
   const [cleaningTasks, setCleaningTasks] = useState(
-    todayDuty?.cleaningTasks || [
-      { id: 'task-1', name: '灶台清洁', completed: false },
-      { id: 'task-2', name: '地面清扫', completed: false },
-      { id: 'task-3', name: '餐具消毒', completed: false },
-      { id: 'task-4', name: '油烟机擦拭', completed: false },
-      { id: 'task-5', name: '垃圾清运', completed: false },
-    ]
+    todayDuty?.cleaningTasks || defaultCleaningTasks
   )
 
   const [reports, setReports] = useState(
@@ -58,14 +65,34 @@ export default function DutyPage() {
 
   const [selectedSupplies, setSelectedSupplies] = useState<
     { id: string; name: string; unit: string; quantity: number }[]
-  >([])
+  >(
+    todayDuty?.consumedMaterials?.map((m) => ({
+      id: m.inventoryId,
+      name: m.name,
+      unit: m.unit,
+      quantity: m.quantity,
+    })) || []
+  )
   const [supplySelectOpen, setSupplySelectOpen] = useState(false)
+
+  const [savedConsumedIds, setSavedConsumedIds] = useState<Map<string, number>>(
+    () => {
+      const map = new Map<string, number>()
+      todayDuty?.consumedMaterials?.forEach((m) => {
+        map.set(m.inventoryId, m.quantity)
+      })
+      return map
+    }
+  )
 
   const [duration, setDuration] = useState(todayDuty?.usageRecord?.duration || 0)
   const [peopleCount, setPeopleCount] = useState(todayDuty?.usageRecord?.peopleCount || 0)
   const [usedDeviceIds, setUsedDeviceIds] = useState<string[]>(
     todayDuty?.usageRecord?.deviceIds || []
   )
+
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false)
+  const [showCleaningWarning, setShowCleaningWarning] = useState(false)
 
   const availableDevices = devices.filter((d) => d.status !== 'broken')
   const supplyItems = inventory.filter((i) => i.category === 'supplies' && i.quantity > 0)
@@ -129,8 +156,49 @@ export default function DutyPage() {
     )
   }
 
-  const handleSave = () => {
-    const dutyStatus: DutyStatus = cleaningTasks.every((t) => t.completed) ? 'completed' : 'in_progress'
+  const allCleaningTasksCompleted = cleaningTasks.every((t) => t.completed)
+
+  const processInventoryChanges = () => {
+    const currentSuppliesMap = new Map<string, number>()
+    selectedSupplies.forEach((s) => {
+      currentSuppliesMap.set(s.id, s.quantity)
+    })
+
+    const allIds = new Set([...savedConsumedIds.keys(), ...currentSuppliesMap.keys()])
+
+    allIds.forEach((id) => {
+      const savedQty = savedConsumedIds.get(id) || 0
+      const currentQty = currentSuppliesMap.get(id) || 0
+      const delta = currentQty - savedQty
+
+      if (delta > 0) {
+        consumeInventory(id, delta)
+      } else if (delta < 0) {
+        const item = inventory.find((i) => i.id === id)
+        if (item) {
+          updateInventory(id, { quantity: item.quantity + Math.abs(delta) })
+        }
+      }
+    })
+
+    const newSavedConsumedIds = new Map<string, number>()
+    selectedSupplies.forEach((s) => {
+      newSavedConsumedIds.set(s.id, s.quantity)
+    })
+    setSavedConsumedIds(newSavedConsumedIds)
+  }
+
+  const doSave = () => {
+    processInventoryChanges()
+
+    const dutyStatus: DutyStatus = allCleaningTasksCompleted ? 'completed' : 'in_progress'
+    const consumedMaterials = selectedSupplies.map((s) => ({
+      inventoryId: s.id,
+      name: s.name,
+      unit: s.unit,
+      quantity: s.quantity,
+    }))
+
     const dutyData: Omit<DutyRecord, 'id' | 'createdAt'> = {
       date: today,
       userId: currentUser.id,
@@ -138,6 +206,7 @@ export default function DutyPage() {
       status: dutyStatus,
       cleaningTasks,
       deviceReports: reports,
+      consumedMaterials,
       usageRecord: {
         deviceIds: usedDeviceIds,
         duration,
@@ -145,15 +214,31 @@ export default function DutyPage() {
       },
     }
 
-    selectedSupplies.forEach((s) => {
-      consumeInventory(s.id, s.quantity)
-    })
-
     if (todayDuty) {
       updateDutyRecord(todayDuty.id, dutyData)
     } else {
       addDutyRecord(dutyData)
     }
+
+    setShowCleaningWarning(false)
+    setShowSaveSuccess(true)
+    setTimeout(() => setShowSaveSuccess(false), 2000)
+  }
+
+  const handleSave = () => {
+    if (settings.cleaningRequired && !allCleaningTasksCompleted) {
+      setShowCleaningWarning(true)
+    } else {
+      doSave()
+    }
+  }
+
+  const handleConfirmSave = () => {
+    doSave()
+  }
+
+  const handleCancelSave = () => {
+    setShowCleaningWarning(false)
   }
 
   const completedTasksCount = cleaningTasks.filter((t) => t.completed).length
@@ -525,6 +610,50 @@ export default function DutyPage() {
             保存值班记录
           </button>
         </div>
+
+        {showSaveSuccess && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+            <div className="flex items-center gap-2 px-5 py-3 rounded-xl bg-secondary text-white shadow-lg shadow-secondary/30">
+              <Check className="w-5 h-5" />
+              <span className="font-medium">保存成功</span>
+            </div>
+          </div>
+        )}
+
+        {showCleaningWarning && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-warning/10 flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6 text-warning" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">清洁任务未完成</h3>
+                  <p className="text-sm text-gray-500">请确认是否继续保存</p>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 mb-6">
+                当前还有 {cleaningTasks.length - completedTasksCount} 项清洁任务未完成。
+                根据设置要求，值班结束时需要完成所有清洁任务。
+                确定要保存未完成的值班记录吗？
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCancelSave}
+                  className="flex-1 py-3 rounded-xl font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmSave}
+                  className="flex-1 py-3 rounded-xl font-medium bg-warning text-white hover:bg-warning/90 transition-colors"
+                >
+                  确认保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

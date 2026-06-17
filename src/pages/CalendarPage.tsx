@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Calendar,
   Clock,
   AlertTriangle,
@@ -10,11 +12,14 @@ import {
   CheckCircle2,
   XCircle,
   Minus,
+  Utensils,
+  Image,
+  FileText,
 } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 import { formatDate, getMonthDates, isSameDay } from '@/utils/helpers'
 import { cn } from '@/lib/utils'
-import type { DeviceType, Booking } from '@/types'
+import type { DeviceType, Booking, BookingStatus } from '@/types'
 
 const deviceTypeLabels: Record<DeviceType, string> = {
   stove: '灶台',
@@ -33,6 +38,9 @@ export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
   const [selectedDate, setSelectedDate] = useState<string>(formatDate(today))
   const [selectedDeviceType, setSelectedDeviceType] = useState<DeviceType | 'all'>('all')
+  const [selectedStatus, setSelectedStatus] = useState<BookingStatus | 'all'>('all')
+  const [expandedBookings, setExpandedBookings] = useState<Set<string>>(new Set())
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
 
   const {
     bookings,
@@ -42,6 +50,16 @@ export default function CalendarPage() {
     getBookingsByDate,
     getDeviceById,
   } = useStore()
+
+  const enabledTimeSlots = useMemo(() => timeSlots.filter((slot) => slot.enabled), [timeSlots])
+
+  const statusLabels: Record<BookingStatus | 'all', string> = {
+    all: '全部',
+    pending: '待审核',
+    confirmed: '已确认',
+    completed: '已完成',
+    cancelled: '已取消',
+  }
 
   const monthDates = useMemo(() => getMonthDates(currentYear, currentMonth), [currentYear, currentMonth])
 
@@ -64,8 +82,11 @@ export default function CalendarPage() {
         })
       )
     }
+    if (selectedStatus !== 'all') {
+      result = result.filter((b) => b.status === selectedStatus)
+    }
     return result
-  }, [selectedDate, selectedDeviceType, getBookingsByDate, getDeviceById])
+  }, [selectedDate, selectedDeviceType, selectedStatus, getBookingsByDate, getDeviceById])
 
   const handlePrevMonth = () => {
     if (currentMonth === 0) {
@@ -86,23 +107,26 @@ export default function CalendarPage() {
   }
 
   const getDateBookings = (dateStr: string): Booking[] => {
-    const dayBookings = bookings.filter((b) => b.date === dateStr && b.status !== 'cancelled')
+    let dayBookings = bookings.filter((b) => b.date === dateStr && b.status !== 'cancelled')
     if (selectedDeviceType !== 'all') {
-      return dayBookings.filter((b) =>
+      dayBookings = dayBookings.filter((b) =>
         b.deviceIds.some((id) => {
           const device = getDeviceById(id)
           return device?.type === selectedDeviceType
         })
       )
     }
+    if (selectedStatus !== 'all') {
+      dayBookings = dayBookings.filter((b) => b.status === selectedStatus)
+    }
     return dayBookings
   }
 
   const getSlotStatus = (slotId: string, dateStr: string) => {
-    const dayBookings = getDateBookings(dateStr).filter((b) => b.timeSlotId === slotId)
-    const slot = timeSlots.find((s) => s.id === slotId)
+    const slot = enabledTimeSlots.find((s) => s.id === slotId)
     if (!slot) return { status: 'idle', count: 0, total: 0 } as const
 
+    const dayBookings = getDateBookings(dateStr).filter((b) => b.timeSlotId === slotId)
     const activeBookings = dayBookings.filter((b) => b.status !== 'cancelled')
     const totalPeople = activeBookings.reduce((sum, b) => sum + b.peopleCount, 0)
 
@@ -113,6 +137,18 @@ export default function CalendarPage() {
       return { status: 'full', count: totalPeople, total: slot.maxCapacity } as const
     }
     return { status: 'booked', count: totalPeople, total: slot.maxCapacity } as const
+  }
+
+  const toggleBookingExpand = (bookingId: string) => {
+    setExpandedBookings((prev) => {
+      const next = new Set(prev)
+      if (next.has(bookingId)) {
+        next.delete(bookingId)
+      } else {
+        next.add(bookingId)
+      }
+      return next
+    })
   }
 
   const hasConflictOnDate = (dateStr: string) => {
@@ -138,9 +174,11 @@ export default function CalendarPage() {
         booked: 0,
         full: 0,
       }
-      timeSlots.forEach((slot) => {
+      enabledTimeSlots.forEach((slot) => {
         const slotStatus = getSlotStatus(slot.id, dateStr)
-        statusCounts[slotStatus.status as keyof typeof statusCounts]++
+        if (slotStatus.status !== 'idle') {
+          statusCounts[slotStatus.status as keyof typeof statusCounts]++
+        }
       })
 
       cells.push(
@@ -220,6 +258,21 @@ export default function CalendarPage() {
                 {(Object.keys(deviceTypeLabels) as DeviceType[]).map((type) => (
                   <option key={type} value={type}>
                     {deviceTypeLabels[type]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
+              <CheckCircle2 className="h-4 w-4 text-gray-500" />
+              <select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value as BookingStatus | 'all')}
+                className="bg-transparent text-sm outline-none cursor-pointer"
+              >
+                {(Object.keys(statusLabels) as (BookingStatus | 'all')[]).map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabels[status]}
                   </option>
                 ))}
               </select>
@@ -325,7 +378,7 @@ export default function CalendarPage() {
               )}
 
               <div className="space-y-3">
-                {timeSlots.map((slot) => {
+                {enabledTimeSlots.map((slot) => {
                   const slotStatus = getSlotStatus(slot.id, selectedDate)
                   const slotBookings = selectedDateBookings.filter(
                     (b) => b.timeSlotId === slot.id && b.status !== 'cancelled'
@@ -384,62 +437,134 @@ export default function CalendarPage() {
                               .map((id) => getDeviceById(id))
                               .filter(Boolean)
                             const hasConflict = conflictBookings.some((b) => b.id === booking.id)
+                            const isExpanded = expandedBookings.has(booking.id)
+                            const menuItems = booking.menu
+                              ? booking.menu.split(/[、,，]/).filter(Boolean)
+                              : []
 
                             return (
                               <div
                                 key={booking.id}
                                 className={cn(
-                                  'rounded-md p-2.5 text-sm',
+                                  'rounded-md text-sm overflow-hidden',
                                   hasConflict
                                     ? 'bg-red-100/80 border border-red-200'
                                     : 'bg-white border border-gray-100'
                                 )}
                               >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <p className="font-medium text-gray-900 truncate">
-                                      {booking.activityName}
-                                    </p>
-                                    <p className="text-gray-600 text-xs mt-0.5">
-                                      {booking.userName} · {booking.peopleCount}人
-                                    </p>
+                                <button
+                                  onClick={() => toggleBookingExpand(booking.id)}
+                                  className="w-full p-2.5 text-left hover:bg-gray-50/50 transition-colors"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-medium text-gray-900 truncate">
+                                        {booking.activityName}
+                                      </p>
+                                      <p className="text-gray-600 text-xs mt-0.5">
+                                        {booking.userName} · {booking.peopleCount}人
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      {hasConflict && (
+                                        <AlertTriangle className="h-4 w-4 text-red-600" />
+                                      )}
+                                      {isExpanded ? (
+                                        <ChevronUp className="h-4 w-4 text-gray-500" />
+                                      ) : (
+                                        <ChevronDown className="h-4 w-4 text-gray-500" />
+                                      )}
+                                    </div>
                                   </div>
-                                  {hasConflict && (
-                                    <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
-                                  )}
-                                </div>
-                                {bookingDevices.length > 0 && (
-                                  <div className="mt-1.5 flex flex-wrap gap-1">
-                                    {bookingDevices.map((device) => (
+                                </button>
+
+                                {isExpanded && (
+                                  <div className="px-2.5 pb-2.5 space-y-2 border-t border-gray-100 pt-2">
+                                    <div>
+                                      <p className="text-xs font-medium text-gray-500 mb-1">用途</p>
+                                      <p className="text-sm text-gray-700">{booking.purpose}</p>
+                                    </div>
+
+                                    {bookingDevices.length > 0 && (
+                                      <div>
+                                        <p className="text-xs font-medium text-gray-500 mb-1">设备</p>
+                                        <div className="flex flex-wrap gap-1">
+                                          {bookingDevices.map((device) => (
+                                            <span
+                                              key={device!.id}
+                                              className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-700"
+                                            >
+                                              {device!.name}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {menuItems.length > 0 && (
+                                      <div>
+                                        <p className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                                          <Utensils className="h-3 w-3" />
+                                          菜品列表
+                                        </p>
+                                        <div className="flex flex-wrap gap-1">
+                                          {menuItems.map((item, idx) => (
+                                            <span
+                                              key={idx}
+                                              className="inline-block rounded bg-orange-100 px-2 py-0.5 text-[10px] text-orange-700"
+                                            >
+                                              {item}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {booking.menuImage && (
+                                      <div>
+                                        <p className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                                          <Image className="h-3 w-3" />
+                                          菜单图片
+                                        </p>
+                                        <div className="relative inline-block">
+                                          <img
+                                            src={booking.menuImage}
+                                            alt={booking.menuImageName || '菜单图片'}
+                                            className="h-20 w-20 object-cover rounded border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
+                                            onClick={() => setPreviewImage(booking.menuImage!)}
+                                          />
+                                          {booking.menuImageName && (
+                                            <p className="text-[10px] text-gray-500 mt-1 flex items-center gap-1">
+                                              <FileText className="h-3 w-3" />
+                                              {booking.menuImageName}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div>
                                       <span
-                                        key={device!.id}
-                                        className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-700"
+                                        className={cn(
+                                          'inline-block rounded-full px-2 py-0.5 text-[10px] font-medium',
+                                          booking.status === 'confirmed' &&
+                                            'bg-green-100 text-green-700',
+                                          booking.status === 'pending' &&
+                                            'bg-blue-100 text-blue-700',
+                                          booking.status === 'completed' &&
+                                            'bg-gray-100 text-gray-600',
+                                          booking.status === 'cancelled' &&
+                                            'bg-gray-100 text-gray-400'
+                                        )}
                                       >
-                                        {device!.name}
+                                        {booking.status === 'confirmed' && '已确认'}
+                                        {booking.status === 'pending' && '待审核'}
+                                        {booking.status === 'completed' && '已完成'}
+                                        {booking.status === 'cancelled' && '已取消'}
                                       </span>
-                                    ))}
+                                    </div>
                                   </div>
                                 )}
-                                <div className="mt-1.5">
-                                  <span
-                                    className={cn(
-                                      'inline-block rounded-full px-2 py-0.5 text-[10px] font-medium',
-                                      booking.status === 'confirmed' &&
-                                        'bg-green-100 text-green-700',
-                                      booking.status === 'pending' &&
-                                        'bg-blue-100 text-blue-700',
-                                      booking.status === 'completed' &&
-                                        'bg-gray-100 text-gray-600',
-                                      booking.status === 'cancelled' &&
-                                        'bg-gray-100 text-gray-400'
-                                    )}
-                                  >
-                                    {booking.status === 'confirmed' && '已确认'}
-                                    {booking.status === 'pending' && '待审核'}
-                                    {booking.status === 'completed' && '已完成'}
-                                    {booking.status === 'cancelled' && '已取消'}
-                                  </span>
-                                </div>
                               </div>
                             )
                           })}
@@ -490,6 +615,28 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-full">
+            <img
+              src={previewImage}
+              alt="菜单图片预览"
+              className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setPreviewImage(null)}
+              className="absolute top-2 right-2 rounded-full bg-white/90 p-2 text-gray-700 hover:bg-white transition-colors shadow-md"
+            >
+              <XCircle className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

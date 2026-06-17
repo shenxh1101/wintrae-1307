@@ -18,6 +18,7 @@ export interface TimeSlot {
   endTime: string
   label: string
   maxCapacity: number
+  enabled: boolean
 }
 
 export interface Device {
@@ -53,6 +54,8 @@ export interface Booking {
   activityName: string
   peopleCount: number
   menu?: string
+  menuImage?: string
+  menuImageName?: string
   status: BookingStatus
   createdAt: string
   note?: string
@@ -74,6 +77,12 @@ export interface DutyRecord {
     deviceName: string
     description: string
     reportedAt: string
+  }[]
+  consumedMaterials: {
+    inventoryId: string
+    name: string
+    unit: string
+    quantity: number
   }[]
   usageRecord?: {
     deviceIds: string[]

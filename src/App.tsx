@@ -5,6 +5,7 @@ import BookingPage from "@/pages/BookingPage";
 import InventoryPage from "@/pages/InventoryPage";
 import DutyPage from "@/pages/DutyPage";
 import AnnouncementsPage from "@/pages/AnnouncementsPage";
+import SettingsPage from "@/pages/SettingsPage";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="duty" element={<DutyPage />} />
           <Route path="announcements" element={<AnnouncementsPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </Router>

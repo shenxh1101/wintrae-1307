@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import {
   ChevronLeft,
   ChevronRight,
@@ -63,6 +63,8 @@ interface BookingFormData {
   deviceIds: string[]
   peopleCount: number
   menu: string
+  menuImage: string
+  menuImageName: string
 }
 
 const initialFormData: BookingFormData = {
@@ -73,6 +75,8 @@ const initialFormData: BookingFormData = {
   deviceIds: [],
   peopleCount: 1,
   menu: '',
+  menuImage: '',
+  menuImageName: '',
 }
 
 export default function BookingPage() {
@@ -80,6 +84,7 @@ export default function BookingPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState<BookingFormData>(initialFormData)
   const [showSuccess, setShowSuccess] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const {
     timeSlots,
@@ -89,6 +94,7 @@ export default function BookingPage() {
     settings,
     addBooking,
     getBookingsByDate,
+    getSlotAvailability,
   } = useStore()
 
   const updateField = <K extends keyof BookingFormData>(
@@ -107,6 +113,18 @@ export default function BookingPage() {
     }))
   }
 
+  const selectedSlotAvailability = useMemo(() => {
+    if (!formData.date || !formData.timeSlotId) {
+      return { remainingCapacity: 0, isFull: false, totalCapacity: 0, usedCapacity: 0 }
+    }
+    return getSlotAvailability(formData.date, formData.timeSlotId)
+  }, [formData.date, formData.timeSlotId, getSlotAvailability])
+
+  const exceedsCapacity = useMemo(() => {
+    if (!formData.timeSlotId) return false
+    return formData.peopleCount > selectedSlotAvailability.remainingCapacity
+  }, [formData.peopleCount, formData.timeSlotId, selectedSlotAvailability.remainingCapacity])
+
   const canProceed = useMemo(() => {
     switch (currentStep) {
       case 1:
@@ -116,13 +134,17 @@ export default function BookingPage() {
       case 3:
         return formData.deviceIds.length > 0
       case 4:
-        return formData.peopleCount >= 1 && formData.peopleCount <= settings.maxPeoplePerBooking
+        return (
+          formData.peopleCount >= 1 &&
+          formData.peopleCount <= settings.maxPeoplePerBooking &&
+          !exceedsCapacity
+        )
       case 5:
         return true
       default:
         return true
     }
-  }, [currentStep, formData, settings.maxPeoplePerBooking])
+  }, [currentStep, formData, settings.maxPeoplePerBooking, exceedsCapacity])
 
   const selectedDateBookings = useMemo(() => {
     return getBookingsByDate(formData.date).filter(
@@ -156,7 +178,34 @@ export default function BookingPage() {
     }
   }
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('图片大小不能超过 5MB')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const result = event.target?.result as string
+      updateField('menuImage', result)
+      updateField('menuImageName', file.name)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleRemoveImage = () => {
+    updateField('menuImage', '')
+    updateField('menuImageName', '')
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
   const handleSubmit = () => {
+    if (exceedsCapacity) return
     addBooking({
       userId: currentUser.id,
       userName: currentUser.name,
@@ -167,6 +216,8 @@ export default function BookingPage() {
       activityName: formData.activityName,
       peopleCount: formData.peopleCount,
       menu: formData.menu || undefined,
+      menuImage: formData.menuImage || undefined,
+      menuImageName: formData.menuImageName || undefined,
     })
     setShowSuccess(true)
   }
@@ -219,6 +270,16 @@ export default function BookingPage() {
               <span className="text-gray-500">申请人</span>
               <span className="font-medium text-gray-900">{currentUser.name}</span>
             </div>
+            {formData.menuImage && (
+              <div className="pt-3 border-t border-gray-200">
+                <p className="text-sm text-gray-500 mb-2">菜单图片</p>
+                <img
+                  src={formData.menuImage}
+                  alt={formData.menuImageName || '菜单图片'}
+                  className="w-full h-40 object-cover rounded-lg"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3">
@@ -331,6 +392,8 @@ export default function BookingPage() {
     const maxDate = new Date()
     maxDate.setDate(today.getDate() + settings.bookingAdvanceDays)
 
+    const enabledSlots = timeSlots.filter((slot) => slot.enabled)
+
     return (
       <div className="space-y-6">
         <div>
@@ -359,11 +422,12 @@ export default function BookingPage() {
             选择时段 <span className="text-red-500">*</span>
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {timeSlots.map((slot) => {
-              const isFull = slotHasConflict(slot.id)
+            {enabledSlots.map((slot) => {
+              const availability = getSlotAvailability(formData.date, slot.id)
+              const isFull = availability.isFull
               const isSelected = formData.timeSlotId === slot.id
-              const currentPeople = getSlotPeopleCount(slot.id)
               const disabled = isFull
+              const remaining = availability.remainingCapacity
 
               return (
                 <button
@@ -401,16 +465,21 @@ export default function BookingPage() {
                       <XCircle className="h-5 w-5 text-gray-400" />
                     )}
                   </div>
-                  <div className="mt-2 flex items-center justify-between text-xs">
-                    <span className={cn(
-                      disabled ? 'text-red-500' : 'text-gray-500'
+                  <div className="mt-3">
+                    <div className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium',
+                      isFull
+                        ? 'bg-red-100 text-red-700'
+                        : remaining <= 3
+                        ? 'bg-orange-100 text-orange-700'
+                        : 'bg-green-100 text-green-700'
                     )}>
-                      <Users className="inline h-3 w-3 mr-1" />
-                      {currentPeople}/{slot.maxCapacity} 人
+                      <Users className="h-3 w-3" />
+                      {isFull ? '已满员' : `剩余 ${remaining} 名额`}
+                    </div>
+                    <span className="text-xs text-gray-400 ml-2">
+                      共 {slot.maxCapacity} 人
                     </span>
-                    {disabled && (
-                      <span className="text-red-500 font-medium">已满</span>
-                    )}
                   </div>
                 </button>
               )
@@ -552,6 +621,25 @@ export default function BookingPage() {
 
   const renderStep4 = () => (
     <div className="space-y-6">
+      {formData.timeSlotId && (
+        <div className={cn(
+          'rounded-lg p-4 text-sm',
+          exceedsCapacity
+            ? 'bg-red-50 border border-red-200'
+            : 'bg-green-50 border border-green-200'
+        )}>
+          <div className="flex items-center gap-2">
+            <Users className={cn('h-4 w-4', exceedsCapacity ? 'text-red-600' : 'text-green-600')} />
+            <span className={cn('font-medium', exceedsCapacity ? 'text-red-700' : 'text-green-700')}>
+              时段剩余名额：{selectedSlotAvailability.remainingCapacity} 人
+            </span>
+          </div>
+          <p className={cn('mt-1 text-xs', exceedsCapacity ? 'text-red-600' : 'text-green-600')}>
+            当前已预约 {selectedSlotAvailability.usedCapacity} 人，总容量 {selectedSlotAvailability.totalCapacity} 人
+          </p>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
           <Users className="h-4 w-4 text-gray-500" />
@@ -565,7 +653,12 @@ export default function BookingPage() {
             <ChevronLeft className="h-5 w-5" />
           </button>
           <div className="flex-1 text-center">
-            <span className="text-3xl font-bold text-gray-900">{formData.peopleCount}</span>
+            <span className={cn(
+              'text-3xl font-bold',
+              exceedsCapacity ? 'text-red-600' : 'text-gray-900'
+            )}>
+              {formData.peopleCount}
+            </span>
             <span className="text-gray-500 ml-1">人</span>
           </div>
           <button
@@ -587,7 +680,11 @@ export default function BookingPage() {
             max={settings.maxPeoplePerBooking}
             value={formData.peopleCount}
             onChange={(e) => updateField('peopleCount', Number(e.target.value))}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
+            className={cn(
+              'w-full h-2 rounded-lg appearance-none cursor-pointer',
+              exceedsCapacity ? 'accent-red-600' : 'accent-orange-600'
+            )}
+            style={{ backgroundColor: exceedsCapacity ? '#fecaca' : '#e5e7eb' }}
           />
           <div className="flex justify-between text-xs text-gray-400 mt-1">
             <span>1人</span>
@@ -597,21 +694,38 @@ export default function BookingPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        {[1, 4, 8, 12, 16, 20].filter((n) => n <= settings.maxPeoplePerBooking).map((num) => (
-          <button
-            key={num}
-            onClick={() => updateField('peopleCount', num)}
-            className={cn(
-              'rounded-lg border py-2.5 text-sm font-medium transition-colors',
-              formData.peopleCount === num
-                ? 'border-orange-500 bg-orange-50 text-orange-700'
-                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-            )}
-          >
-            {num}人
-          </button>
-        ))}
+        {[1, 4, 8, 12, 16, 20].filter((n) => n <= settings.maxPeoplePerBooking).map((num) => {
+          const exceeds = formData.timeSlotId && num > selectedSlotAvailability.remainingCapacity
+          return (
+            <button
+              key={num}
+              onClick={() => updateField('peopleCount', num)}
+              className={cn(
+                'rounded-lg border py-2.5 text-sm font-medium transition-colors',
+                formData.peopleCount === num
+                  ? exceeds
+                    ? 'border-red-500 bg-red-50 text-red-700'
+                    : 'border-orange-500 bg-orange-50 text-orange-700'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              )}
+            >
+              {num}人
+            </button>
+          )
+        })}
       </div>
+
+      {exceedsCapacity && (
+        <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-5 w-5 text-red-600 flex-shrink-0" />
+          <div className="text-red-700">
+            <p className="font-medium">人数超出限制</p>
+            <p className="text-red-600 mt-1">
+              当前登记人数超过该时段剩余名额，请减少人数或选择其他时段。
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg bg-orange-50 p-4 text-sm text-orange-700">
         <p className="font-medium mb-1">人数限制</p>
@@ -646,18 +760,46 @@ export default function BookingPage() {
           <Upload className="h-4 w-4 text-gray-500" />
           上传菜单图片（可选）
         </label>
-        <div className="flex items-center justify-center w-full">
-          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-orange-50/50 hover:border-orange-300 transition-colors">
-            <div className="flex flex-col items-center justify-center pt-4 pb-5">
-              <Upload className="h-8 w-8 text-gray-400 mb-2" />
-              <p className="text-sm text-gray-500">
-                <span className="font-medium text-orange-600">点击上传</span> 或拖拽文件到此处
+        {formData.menuImage ? (
+          <div className="relative rounded-lg border border-gray-200 overflow-hidden">
+            <img
+              src={formData.menuImage}
+              alt={formData.menuImageName || '菜单图片'}
+              className="w-full h-48 object-contain bg-gray-50"
+            />
+            <button
+              onClick={handleRemoveImage}
+              className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors shadow-lg"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="p-3 bg-white border-t border-gray-100">
+              <p className="text-sm text-gray-700 truncate">
+                <FileText className="inline h-4 w-4 mr-1.5 text-gray-400" />
+                {formData.menuImageName}
               </p>
-              <p className="text-xs text-gray-400 mt-1">支持 JPG、PNG 格式，单张不超过 5MB</p>
             </div>
-            <input type="file" className="hidden" accept="image/*" />
-          </label>
-        </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center w-full">
+            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-orange-50/50 hover:border-orange-300 transition-colors">
+              <div className="flex flex-col items-center justify-center pt-4 pb-5">
+                <Upload className="h-8 w-8 text-gray-400 mb-2" />
+                <p className="text-sm text-gray-500">
+                  <span className="font-medium text-orange-600">点击上传</span> 或拖拽文件到此处
+                </p>
+                <p className="text-xs text-gray-400 mt-1">支持 JPG、PNG 格式，单张不超过 5MB</p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept="image/*"
+                onChange={handleImageUpload}
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-700">
@@ -704,6 +846,50 @@ export default function BookingPage() {
 
     return (
       <div className="space-y-6">
+        {formData.timeSlotId && (
+          <div className={cn(
+            'rounded-xl border p-4',
+            exceedsCapacity
+              ? 'bg-red-50 border-red-200'
+              : 'bg-green-50 border-green-200'
+          )}>
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-lg',
+                exceedsCapacity ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'
+              )}>
+                <Users className="h-5 w-5" />
+              </div>
+              <div>
+                <p className={cn(
+                  'font-medium',
+                  exceedsCapacity ? 'text-red-700' : 'text-green-700'
+                )}>
+                  时段剩余名额：{selectedSlotAvailability.remainingCapacity} 人
+                </p>
+                <p className={cn(
+                  'text-xs mt-0.5',
+                  exceedsCapacity ? 'text-red-600' : 'text-green-600'
+                )}>
+                  当前已预约 {selectedSlotAvailability.usedCapacity} 人，总容量 {selectedSlotAvailability.totalCapacity} 人
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {exceedsCapacity && (
+          <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-4 text-sm">
+            <AlertTriangle className="mt-0.5 h-5 w-5 text-red-600 flex-shrink-0" />
+            <div className="text-red-700">
+              <p className="font-medium">人数超出限制</p>
+              <p className="text-red-600 mt-1">
+                当前登记人数超过该时段剩余名额，请返回上一步减少人数或选择其他时段。
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">请确认预约信息</h3>
           <div className="space-y-4">
@@ -723,6 +909,21 @@ export default function BookingPage() {
                 </div>
               )
             })}
+            {formData.menuImage && (
+              <div className="flex gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-100 text-orange-600 flex-shrink-0">
+                  <ChefHat className="h-4.5 w-4.5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-500">菜单图片</p>
+                  <img
+                    src={formData.menuImage}
+                    alt={formData.menuImageName || '菜单图片'}
+                    className="mt-1 w-full max-w-xs h-24 object-cover rounded-lg border border-gray-200"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -811,7 +1012,13 @@ export default function BookingPage() {
             ) : (
               <button
                 onClick={handleSubmit}
-                className="flex items-center gap-1.5 rounded-lg bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+                disabled={exceedsCapacity}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors',
+                  exceedsCapacity
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                )}
               >
                 <CheckCircle2 className="h-4 w-4" />
                 确认提交
